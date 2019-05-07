@@ -2,10 +2,11 @@ var tf = require("@tensorflow/tfjs");
 const csv = require("csv-parser");
 const fs = require("fs");
 Canvas = require("canvas");
-const IMG_Width = 64;
-const IMG_Height = 64;
+const IMG_Width = 28;
+const IMG_Height = 28;
 const IMAGE_SIZE = IMG_Height * IMG_Width;
 var NUM_CLASSES;
+var CLASSES;
 var currentModel;
 var datas;
 var xs;
@@ -24,14 +25,26 @@ function readFileCsv() {
       results.push(data);
       labels.push(data.label);
     })
-    .on("end", () => {
+    .on("end", async () => {
       datas = results;
-      NUM_CLASSES = labels.filter(distinct).length;
+      CLASSES = labels.filter(distinct);
+      NUM_CLASSES = CLASSES.length;
       currentModel = createConvModel();
-      console.log(currentModel.summary());
-      console.log(getTrainData());
+      // await model.save('file:///E:/AI_ML_DL/Data/vn_celeb_face_recognition/');
+      getTrainData();
       console.log("start train");
-      train(currentModel);
+      await train(currentModel);
+      const result = currentModel.predict(
+        getImgAndResize(
+          "E:/AI_ML_DL/Data/vn_celeb_face_recognition/test/3b74899aa5634d8ab858efec894916da.png"
+        )
+      );
+      const arr = result.arraySync();
+      console.log("arr", arr);
+      const index = arr[0].indexOf(Math.max(...arr[0]));
+      console.log("index", index);
+      console.log("result", CLASSES[index]);
+      console.log("dcx", arr[0][index]);
     });
 }
 
@@ -76,61 +89,6 @@ function createConvModel() {
 
   return model;
 }
-
-// async function train(model, onIteration) {
-//     const optimizer = 'rmsprop';
-//     model.compile({
-//         optimizer,
-//         loss: 'categoricalCrossentropy',
-//         metrics: ['accuracy'],
-//     });
-//     const batchSize = 200;
-//     const validationSplit = 0.15;
-//     const trainEpochs = 25;
-//     let trainBatchCount = 0;
-
-//     const trainData = data.getTrainData();
-//     // const testData = data.getTestData();
-
-//     const totalNumBatches = Math.ceil(trainData.xs.shape[0] * (1 - validationSplit) / batchSize) * trainEpochs;
-//     let valAcc;
-//     await model.fit(trainData.xs, trainData.labels, {
-//         batchSize,
-//         validationSplit,
-//         epochs: trainEpochs,
-//         callbacks: {
-//             onBatchEnd: async (batch, logs) => {
-//                 trainBatchCount++;
-//                 console.log(
-//                     `Training... (` +
-//                     `${(trainBatchCount / totalNumBatches * 100).toFixed(1)}%` +
-//                     ` complete). To stop training, refresh or close page.`);
-//                 // ui.plotLoss(trainBatchCount, logs.loss, 'train');
-//                 // ui.plotAccuracy(trainBatchCount, logs.acc, 'train');
-//                 if (onIteration && batch % 10 === 0) {
-//                     onIteration('onBatchEnd', batch, logs);
-//                 }
-//                 await tf.nextFrame();
-//             },
-//             onEpochEnd: async (epoch, logs) => {
-//                 valAcc = logs.val_acc;
-//                 // ui.plotLoss(trainBatchCount, logs.val_loss, 'validation');
-//                 // ui.plotAccuracy(trainBatchCount, logs.val_acc, 'validation');
-//                 if (onIteration) {
-//                     onIteration('onEpochEnd', epoch, logs);
-//                 }
-//                 await tf.nextFrame();
-//             }
-//         }
-//     });
-
-// const testResult = model.evaluate(testData.xs, testData.labels);
-// const testAccPercent = testResult[1].dataSync()[0] * 100;
-// const finalValAccPercent = valAcc * 100;
-// ui.logStatus(
-//     `Final validation accuracy: ${finalValAccPercent.toFixed(1)}%; ` +
-//     `Final test accuracy: ${testAccPercent.toFixed(1)}%`);
-// }
 function getTrainData() {
   const labels = [];
   var i = 0;
@@ -161,10 +119,8 @@ function getTrainData() {
     labels.push(+item.label);
     console.log("i:" + i);
   }
-  console.log("label start");
-  ys = tf.tensor1d(labels);
-  console.log("label done");
-  return { xs, ys };
+  ys = labelsToLabelTrain(labels);
+  console.log("get train data done");
 }
 function getImgAndResize(path) {
   var img = new Canvas.Image(); // Create a new Image
@@ -189,17 +145,34 @@ const distinct = (value, index, self) => {
   return self.indexOf(value) === index;
 };
 
-function train(model) {
-  const batchSize = 200;
-  const optimizer = tf.train.adam(0.0005);
+async function train(model) {
+  const batchSize = 500;
+  const optimizer = tf.train.adam(0.005);
   model.compile({ optimizer: optimizer, loss: "categoricalCrossentropy" });
-  model.fit(xs, ys, {
-    batchSize,
-    epochs: 20,
-    callbacks: {
-      onBatchEnd: async (batch, logs) => {
-        console.log("Loss: " + logs.loss.toFixed(5));
+  try {
+    await model.fit(xs, ys, {
+      batchSize,
+      epochs: 3,
+      callbacks: {
+        onBatchEnd: async (batch, logs) => {
+          console.log("Loss: " + logs.loss.toFixed(5));
+        }
+      }
+    });
+  } catch (error) {
+    console.log(error);
+  }
+}
+function labelsToLabelTrain(labels) {
+  const result = [];
+  for (const item of labels) {
+    let arr = new Array(NUM_CLASSES).fill(0);
+    for (let index = 0; index < CLASSES.length; index++) {
+      if (item === +CLASSES[index]) {
+        arr[index] = 1;
       }
     }
-  });
+    result.push(arr);
+  }
+  return tf.tensor2d(result, [datas.length, NUM_CLASSES]);
 }
