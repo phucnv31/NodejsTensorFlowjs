@@ -2,8 +2,8 @@ var tf = require("@tensorflow/tfjs");
 const csv = require("csv-parser");
 const fs = require("fs");
 Canvas = require("canvas");
-const IMG_Width = 28;
-const IMG_Height = 28;
+const IMG_Width = 64;
+const IMG_Height = 64;
 const IMAGE_SIZE = IMG_Height * IMG_Width;
 var NUM_CLASSES;
 var CLASSES;
@@ -27,10 +27,13 @@ function readFileCsv() {
     })
     .on("end", async () => {
       datas = results;
-      CLASSES = labels.filter(distinct);
+      CLASSES = labels.filter(distinct).sort((a, b) => {
+        return a - b;
+      });
       NUM_CLASSES = CLASSES.length;
       currentModel = createConvModel();
-      // await model.save('file:///E:/AI_ML_DL/Data/vn_celeb_face_recognition/');
+      currentModel.summary();
+      // await currentModel.save('E:/AI_ML_DL/Data/vn_celeb_face_recognition/');
       getTrainData();
       console.log("start train");
       await train(currentModel);
@@ -49,34 +52,20 @@ function readFileCsv() {
 }
 
 function createConvModel() {
-  // Create a sequential neural network model. tf.sequential provides an API
-  // for creating "stacked" models where the output from one layer is used as
-  // the input to the next layer.
   const model = tf.sequential();
-
   model.add(
     tf.layers.conv2d({
-      inputShape: [IMG_Height, IMG_Width, 3],
+      inputShape: [IMG_Height, IMG_Width, 1],
       kernelSize: 3,
       filters: 16,
       activation: "relu"
     })
   );
-
-  // After the first layer we include a MaxPooling layer. This acts as a sort of
-  // downsampling using max values in a region instead of averaging.
-  // https://www.quora.com/What-is-max-pooling-in-convolutional-neural-networks
   model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
-
-  // Our third layer is another convolution, this time with 32 filters.
   model.add(
     tf.layers.conv2d({ kernelSize: 3, filters: 32, activation: "relu" })
   );
-
-  // Max pooling again.
   model.add(tf.layers.maxPooling2d({ poolSize: 2, strides: 2 }));
-
-  // Add another conv2d layer.
   model.add(
     tf.layers.conv2d({ kernelSize: 3, filters: 32, activation: "relu" })
   );
@@ -84,7 +73,7 @@ function createConvModel() {
   model.add(tf.layers.flatten({}));
 
   model.add(tf.layers.dense({ units: 64, activation: "relu" }));
-
+  model.add(tf.layers.dropout(0.5));
   model.add(tf.layers.dense({ units: NUM_CLASSES, activation: "softmax" }));
 
   return model;
@@ -94,26 +83,14 @@ function getTrainData() {
   var i = 0;
   for (const item of datas) {
     i++;
+    const img = getImgAndResize(
+      "E:/AI_ML_DL/Data/vn_celeb_face_recognition/train/" + item.image
+    );
     if (!xs) {
-      // For the first example that gets added, keep example and y so that the
-      // ControllerDataset owns the memory of the inputs. This makes sure that
-      // if addExample() is called in a tf.tidy(), these Tensors will not get
-      // disposed.
-      xs = tf.keep(
-        getImgAndResize(
-          "E:/AI_ML_DL/Data/vn_celeb_face_recognition/train/" + item.image
-        )
-      );
+      xs = tf.keep(img);
     } else {
       const oldX = xs;
-      xs = tf.keep(
-        oldX.concat(
-          getImgAndResize(
-            "E:/AI_ML_DL/Data/vn_celeb_face_recognition/train/" + item.image
-          ),
-          0
-        )
-      );
+      xs = tf.keep(oldX.concat(tf.keep(img), 0));
       oldX.dispose();
     }
     labels.push(+item.label);
@@ -127,15 +104,24 @@ function getImgAndResize(path) {
   img.src = path;
   var canvas = Canvas.createCanvas(img.width, img.height);
   var ctx = canvas.getContext("2d");
-  ctx.drawImage(img, 0, 0, img.width / 4, img.height / 4);
-  var image = tf.browser.fromPixels(canvas);
-  // Crop the image so we're using the center square of the rectangular
-  // webcam.
+  ctx.drawImage(img, 0, 0);
+
+  let pixels = ctx.getImageData(0, 0, img.width, img.height);
+  for (let y = 0; y < pixels.height; y++) {
+    for (let x = 0; x < pixels.width; x++) {
+      let i = y * 4 * pixels.width + x * 4;
+      let avg = (pixels.data[i] + pixels.data[i + 1] + pixels.data[i + 2]) / 3;
+
+      pixels.data[i] = avg;
+      pixels.data[i + 1] = avg;
+      pixels.data[i + 2] = avg;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0, 0, 0, pixels.width, pixels.height);
+
+  var image = tf.browser.fromPixels(canvas, 1);
   image = tf.image.resizeBilinear(image, [IMG_Height, IMG_Width], false);
-  // Expand the outer most dimension so we have a batch size of 1.
   const batchedImage = image.expandDims(0);
-  // Normalize the image between -1 and 1. The image comes in between 0-255,
-  // so we divide by 127 and subtract 1.
   return batchedImage
     .toFloat()
     .div(tf.scalar(127))
@@ -146,13 +132,17 @@ const distinct = (value, index, self) => {
 };
 
 async function train(model) {
-  const batchSize = 500;
-  const optimizer = tf.train.adam(0.005);
-  model.compile({ optimizer: optimizer, loss: "categoricalCrossentropy" });
+  const batchSize = 400;
+  const optimizer = tf.train.adam(0.01);
+  model.compile({
+    optimizer: optimizer,
+    loss: "categoricalCrossentropy",
+    metric: "accuracy"
+  });
   try {
     await model.fit(xs, ys, {
       batchSize,
-      epochs: 3,
+      epochs: 4,
       callbacks: {
         onBatchEnd: async (batch, logs) => {
           console.log("Loss: " + logs.loss.toFixed(5));
@@ -170,6 +160,7 @@ function labelsToLabelTrain(labels) {
     for (let index = 0; index < CLASSES.length; index++) {
       if (item === +CLASSES[index]) {
         arr[index] = 1;
+        break;
       }
     }
     result.push(arr);
