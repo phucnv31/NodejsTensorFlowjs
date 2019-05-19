@@ -126,16 +126,14 @@ function logFile(content) {
 }
 
 function predict(path) {
-  console.log(path);
   const pre = currentModel.predict(truncatedMobileNet.predict(getImgAndResize('D:/LapTrinh/AI/ANN/DataSet/vn_celeb_face_recognition/test/' + path)))
   const arr = pre.arraySync();
   const maxScore = Math.max(...arr[0]);
-  console.log('max score', maxScore);
   const index = arr[0].indexOf(maxScore)
-  console.log('max score class', CLASSES[index]);
   return { maxScore: maxScore, class: CLASSES[index] };
 }
 function predictFolder() {
+  let i = 0;
   fs.readdir("D:/LapTrinh/AI/ANN/DataSet/vn_celeb_face_recognition/test/", function (err, files) {
     //handling error
     if (err) {
@@ -143,21 +141,17 @@ function predictFolder() {
     }
     //listing all files using forEach
     let lines = '';
-    files.forEach(function (file) {
+    for (const file of files) {
+      if (i++ > 1000) {
+        break;
+      }
       const pre = predict(file);
       if (pre.maxScore >= 0.5) {
         lines += file + " : " + pre.class + " : " + pre.maxScore + "\n";
       }
-    });
+    }
     logFile(lines);
   });
-  console.log(path);
-  const pre = currentModel.predict(truncatedMobileNet.predict(getImgAndResize('D:/LapTrinh/AI/ANN/DataSet/vn_celeb_face_recognition/test/' + path)))
-  const arr = pre.arraySync();
-  const maxScore = Math.max(...arr[0]);
-  console.log('max score', maxScore);
-  const index = arr[0].indexOf(maxScore)
-  console.log('max score class', CLASSES[index]);
 }
 async function loadTruncatedMobileNet() {
   const mobilenet = await tf.loadLayersModel(
